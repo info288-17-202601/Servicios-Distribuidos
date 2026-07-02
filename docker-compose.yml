@@ -1,0 +1,116 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  service_manager:
+    build:
+      context: .
+      dockerfile: service_manager/Dockerfile
+    container_name: service_manager
+    environment:
+      DATABASE_URL:  ${DATABASE_URL}
+      SERVICE_HOST:  0.0.0.0
+      SERVICE_PORT:  ${SERVICE_MANAGER_PORT}
+    ports:
+      - "${SERVICE_MANAGER_PORT}:${SERVICE_MANAGER_PORT}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend_net
+    restart: on-failure
+
+  stats_service:
+    build:
+      context: .
+      dockerfile: stats_service/Dockerfile
+    container_name: stats_service
+    environment:
+      DATABASE_URL:  ${DATABASE_URL}
+      SERVICE_HOST:  0.0.0.0
+      SERVICE_PORT:  ${STATS_SERVICE_PORT}
+    ports:
+      - "${STATS_SERVICE_PORT}:${STATS_SERVICE_PORT}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend_net
+    restart: on-failure
+
+  api_gateway_1:
+    build:
+      context: .
+      dockerfile: api_gateway/Dockerfile
+    container_name: api_gateway_1
+    environment:
+      DATABASE_URL:        ${DATABASE_URL}
+      SERVICE_MANAGER_URL: ${SERVICE_MANAGER_URL}
+      STATS_SERVICE_URL:   ${STATS_SERVICE_URL}
+      GATEWAY_HOST:        0.0.0.0
+      GATEWAY_PORT:        ${GATEWAY_PORT}
+      INSTANCE_ID:         ${GATEWAY_1_INSTANCE_ID}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend_net
+    restart: on-failure
+
+  api_gateway_2:
+    build:
+      context: .
+      dockerfile: api_gateway/Dockerfile
+    container_name: api_gateway_2
+    environment:
+      DATABASE_URL:        ${DATABASE_URL}
+      SERVICE_MANAGER_URL: ${SERVICE_MANAGER_URL}
+      STATS_SERVICE_URL:   ${STATS_SERVICE_URL}
+      GATEWAY_HOST:        0.0.0.0
+      GATEWAY_PORT:        ${GATEWAY_PORT}
+      INSTANCE_ID:         ${GATEWAY_2_INSTANCE_ID}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend_net
+    restart: on-failure
+
+  nginx:
+    build:
+      context: ./load_balancer
+      dockerfile: Dockerfile
+    container_name: nginx_lb
+    ports:
+      - "80:80"
+      - "8080:8080"
+    depends_on:
+      - api_gateway_1
+      - api_gateway_2
+    networks:
+      - backend_net
+    restart: on-failure
+
+volumes:
+  postgres_data:
+
+networks:
+  backend_net:
+    driver: bridge
