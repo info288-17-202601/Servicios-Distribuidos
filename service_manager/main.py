@@ -18,9 +18,60 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
+from jose import jwt
+from passlib.context import CryptContext
+from datetime import timedelta
+
 sys.path.insert(0, "/app")
 from shared.database import get_db, init_db
-from shared.models import Client, Service, ClientServicePermission
+from shared.models import (
+    Admin,
+    Client,
+    Service,
+    ClientServicePermission
+)
+
+from fastapi.security import HTTPBearer
+from fastapi.security import HTTPAuthorizationCredentials
+
+security = HTTPBearer()
+
+SECRET_KEY = "change_this_secret_key"
+
+ALGORITHM = "HS256"
+
+ACCESS_TOKEN_EXPIRE_MINUTES = 480
+
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto"
+)
+
+class LoginAdmin(BaseModel):
+
+    username: str
+
+    password: str
+
+
+class LoginClient(BaseModel):
+
+    email: str
+
+    api_key: str
+
+
+class ClientUpdate(BaseModel):
+
+    name: str | None = None
+
+    email: str | None = None
+
+    api_key: str | None = None
+
+    machine_id: str | None = None
+
+    is_active: bool | None = None
 
 # Schemas Pydantic
 
@@ -247,3 +298,232 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=os.getenv("SERVICE_HOST", "0.0.0.0"),
                 port=int(os.getenv("SERVICE_PORT", 8001)), reload=False)
+
+def create_token(data: dict):
+
+    payload = data.copy()
+
+    expire = datetime.utcnow() + timedelta(
+        minutes=ACCESS_TOKEN_EXPIRE_MINUTES
+    )
+
+    payload["exp"] = expire
+
+    return jwt.encode(
+        payload,
+        SECRET_KEY,
+        algorithm=ALGORITHM
+    )
+
+@app.post("/login")
+async def login_admin(
+    body: LoginAdmin,
+    db: AsyncSession = Depends(get_db)
+):
+
+    result = await db.execute(
+        select(Admin).where(
+            Admin.username == body.username
+        )
+    )
+
+    admin = result.scalar_one_or_none()
+
+    if not admin:
+
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid credentials"
+        )
+
+    if not pwd_context.verify(
+        body.password,
+        admin.password_hash
+    ):
+
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid credentials"
+        )
+
+    token = create_token({
+
+        "sub": admin.username,
+
+        "role": "admin"
+
+    })
+
+    return {
+
+        "token": token,
+
+        "username": admin.username
+
+    }
+
+@app.post("/client/login")
+async def login_client(
+    body: LoginClient,
+    db: AsyncSession = Depends(get_db)
+):
+
+    result = await db.execute(
+        select(Client).where(
+            Client.email == body.email,
+            Client.api_key == body.api_key
+        )
+    )
+
+    client = result.scalar_one_or_none()
+
+    if not client:
+
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid credentials"
+        )
+
+    if not client.is_active:
+
+        raise HTTPException(
+            status_code=403,
+            detail="Client disabled"
+        )
+
+    token = create_token({
+
+        "sub": client.email,
+
+        "role": "client",
+
+        "client_id": client.id
+
+    })
+
+    return {
+
+        "token": token,
+
+        "client_id": client.id,
+
+        "name": client.name
+
+    }
+
+@app.get("/clients/{client_id}")
+async def get_client(
+
+    client_id: int,
+
+    db: AsyncSession = Depends(get_db)
+
+):
+
+    client = await db.get(
+        Client,
+        client_id
+    )
+
+    if not client:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Client not found"
+        )
+
+    return {
+
+        "id": client.id,
+
+        "name": client.name,
+
+        "email": client.email,
+
+        "api_key": client.api_key,
+
+        "machine_id": client.machine_id,
+
+        "is_active": client.is_active
+
+    }
+
+@app.put("/clients/{client_id}")
+async def update_client(
+
+    client_id: int,
+
+    body: ClientUpdate,
+
+    db: AsyncSession = Depends(get_db)
+
+):
+
+    client = await db.get(
+        Client,
+        client_id
+    )
+
+    if not client:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Client not found"
+        )
+
+    values = body.model_dump(
+        exclude_none=True
+    )
+
+    for key, value in values.items():
+
+        setattr(client, key, value)
+
+    await db.commit()
+
+    await db.refresh(client)
+
+    return {
+
+        "message": "Client updated",
+
+        "id": client.id
+
+    }
+
+async def get_current_user(
+
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+
+):
+
+    try:
+
+        return jwt.decode(
+
+            credentials.credentials,
+
+            SECRET_KEY,
+
+            algorithms=[ALGORITHM]
+
+        )
+
+    except:
+
+        raise HTTPException(
+
+            status_code=401,
+
+            detail="Invalid token"
+
+        )
+    
+@app.get("/me")
+async def me(
+
+    user = Depends(get_current_user)
+
+):
+
+    return user

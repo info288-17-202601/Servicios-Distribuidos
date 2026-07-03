@@ -101,3 +101,18 @@ SELECT c.id, s.id
 FROM clients c, services s
 WHERE c.email = 'demo2@example.com' AND s.name IN ('quotes', 'ip_info')
 ON CONFLICT DO NOTHING;
+
+INSERT INTO admins
+(
+    username,
+    email,
+    password_hash
+)
+VALUES
+(
+    'admin',
+    'admin@test.com',
+    '$2b$12$6hPiYlSxPmyvYj0gKnM4IuGqUvvH0nUQHnYzO4VYV5T4Xh1nQ6PKe'
+)
+ON CONFLICT(username)
+DO NOTHING;
