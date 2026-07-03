@@ -65,7 +65,7 @@ services:
       SERVICE_MANAGER_URL: ${SERVICE_MANAGER_URL}
       STATS_SERVICE_URL:   ${STATS_SERVICE_URL}
       GATEWAY_HOST:        0.0.0.0
-      GATEWAY_PORT:        ${GATEWAY_PORT}
+      GATEWAY_PORT:        8000
       INSTANCE_ID:         ${GATEWAY_1_INSTANCE_ID}
     depends_on:
       postgres:
@@ -84,7 +84,7 @@ services:
       SERVICE_MANAGER_URL: ${SERVICE_MANAGER_URL}
       STATS_SERVICE_URL:   ${STATS_SERVICE_URL}
       GATEWAY_HOST:        0.0.0.0
-      GATEWAY_PORT:        ${GATEWAY_PORT}
+      GATEWAY_PORT:        8000
       INSTANCE_ID:         ${GATEWAY_2_INSTANCE_ID}
     depends_on:
       postgres:
@@ -101,12 +101,23 @@ services:
     ports:
       - "80:80"
       - "8080:8080"
+      - "8443:443"
     depends_on:
       - api_gateway_1
       - api_gateway_2
     networks:
       - backend_net
     restart: on-failure
+    volumes:
+      - ./load_balancer/nginx.conf:/etc/nginx/nginx.conf
+      - ./load_balancer/ssl:/etc/nginx/ssl
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    environment:
+      REDIS_URL: redis://redis:6379
 
 volumes:
   postgres_data:

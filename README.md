@@ -214,3 +214,60 @@ docker compose down
 # Detener y eliminar también el volumen de datos
 docker compose down -v
 ```
+
+
+## Crear las CA (Certificate of authority)
+
+En la carpeta de certificados hay .cnf para configurar los certificados de los clientes, el servidor, y nginx
+
+```bash
+openssl genrsa -out ca.key 4096
+
+openssl req -x509 -new -sha256 -days 3650 \
+  -key ca.key \
+  -out ca.crt \
+  -config ca.cnf
+```
+Ésto crea los metadatos del certificado para los otros certificados
+
+Para cliente1
+```bash
+openssl genrsa -out cliente1.key 2048
+
+openssl req -new -key cliente1.key -out cliente1.csr -subj "/CN=cliente1"
+
+openssl x509 -req -in cliente1.csr \
+  -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out cliente1.crt -days 365 -sha256 \
+  -extfile client.cnf -extensions v3_req
+```
+Esto firma el certificado por el servidor
+
+Para cliente2
+```bash
+openssl genrsa -out cliente2.key 2048
+
+openssl req -new -key cliente2.key -out cliente2.csr -subj "/CN=cliente2"
+
+openssl x509 -req -in cliente2.csr \
+  -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out cliente2.crt -days 365 -sha256 \
+  -extfile client.cnf -extensions v3_req
+```
+
+Para Nginx
+```bash
+openssl genrsa -out nginx.key 2048
+
+openssl req -new -key nginx.key -out nginx.csr -config server_ext.cnf
+
+openssl x509 -req -in nginx.csr \
+  -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out nginx.crt -days 365 -sha256 \
+  -extfile server_ext.cnf -extensions v3_req
+```
+
+Estos certificados son verificables con
+```bash
+openssl x509 -in cliente2.crt -text -noout
+```

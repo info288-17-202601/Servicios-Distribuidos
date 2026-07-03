@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS clients (
     email       VARCHAR(120) NOT NULL UNIQUE,
     api_key     VARCHAR(64)  NOT NULL UNIQUE,
     machine_id  VARCHAR(128),          -- identificador de la máquina registrada
+    cert_subject VARCHAR(128),
     is_active   BOOLEAN      DEFAULT TRUE,
     created_at  TIMESTAMP    DEFAULT NOW()
 );

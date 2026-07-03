@@ -5,15 +5,23 @@ import asyncio
 import httpx
 import json
 from datetime import datetime
+import ssl
 
-GATEWAY_URL = "http://localhost:80"
+GATEWAY_URL = "https://localhost:8443"
 API_KEY     = "testclient-key-001"
+CLIENT_CERT = "cliente1.crt"
+CLIENT_KEY  = "cliente1.key"
+CA_CERT     = "ca.crt"
 
 HEADERS = {
     "X-API-Key":    API_KEY,
     "Content-Type": "application/json",
 }
 
+ssl_context = ssl.create_default_context(cafile="ca.crt")
+ssl_context.load_cert_chain(certfile="cliente1.crt", keyfile="cliente1.key")
+
+transport = httpx.AsyncHTTPTransport(verify=ssl_context)
 
 def print_banner():
     print("\n" + "="*60)
@@ -65,7 +73,9 @@ async def call_service(client: httpx.AsyncClient, service_name: str, params: dic
 
 async def demo_concurrent_requests():
     print("── Requests Concurrentes (asyncio.gather) ──────────────")
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(transport=transport, timeout=15.0) as client:
+        r = await client.get("https://localhost:8443/api/quotes")
+        print(r.status_code, r.text)
         await asyncio.gather(
             call_service(client, "quotes"),
             call_service(client, "ip_info"),
@@ -77,7 +87,9 @@ async def demo_concurrent_requests():
 
 async def demo_sequential_requests():
     print("── Requests Secuenciales ────────────────────────────────")
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(transport=transport, timeout=15.0) as client:
+        r = await client.get("https://localhost:8443/api/quotes")
+        print(r.status_code, r.text)
         await call_service(client, "quotes")
         await call_service(client, "ip_info")
         await call_service(client, "echo", body={
@@ -88,7 +100,9 @@ async def demo_sequential_requests():
 
 async def demo_forbidden_service():
     print("── Verificación de Permisos ─────────────────────────────")
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(transport=transport, timeout=10.0) as client:
+        r = await client.get("https://localhost:8443/api/quotes")
+        print(r.status_code, r.text)
         print("Cliente 1 → weather (tiene permiso):")
         resp = await client.get(
             f"{GATEWAY_URL}/api/weather",
@@ -117,7 +131,9 @@ async def demo_forbidden_service():
 async def demo_load_balancing():
     print("── Distribución de Carga (10 requests) ─────────────────")
     instances: dict[str, int] = {}
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(transport=transport, timeout=10.0) as client:
+        r = await client.get("https://localhost:8443/api/quotes")
+        print(r.status_code, r.text)
         tasks     = [client.get(f"{GATEWAY_URL}/health") for _ in range(10)]
         responses = await asyncio.gather(*tasks, return_exceptions=True)
         for resp in responses:
@@ -141,7 +157,7 @@ async def main():
     await demo_load_balancing()
 
     print("── Estadísticas del Sistema ─────────────────────────────")
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(transport=transport, timeout=10.0) as client:
         resp = await client.get("http://localhost:8002/stats/overview")
         if resp.status_code == 200:
             ov = safe_json(resp) or {}

@@ -1,0 +1,15 @@
+[req]
+distinguished_name = dn
+prompt = no
+
+[dn]
+CN = localhost
+
+[v3_req]
+basicConstraints = CA:FALSE
+keyUsage = digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt
+
+[alt]
+DNS.1 = localhost

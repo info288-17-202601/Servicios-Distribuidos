@@ -32,6 +32,7 @@ class Client(Base):
     email      = Column(String(120), nullable=False, unique=True)
     api_key    = Column(String(64),  nullable=False, unique=True)
     machine_id = Column(String(128))
+    cert_subject = Column(String, nullable=True)
     is_active  = Column(Boolean,     default=True)
     created_at = Column(DateTime,    default=datetime.utcnow)
 

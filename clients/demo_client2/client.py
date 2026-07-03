@@ -13,12 +13,14 @@ import time
 import random
 from datetime import datetime
 
-GATEWAY_URL  = "http://localhost:80"
+GATEWAY_URL  = "https://localhost:8443"
 API_KEY      = "testclient-key-002"   # Cliente con acceso limitado (quotes, ip_info)
 ADMIN_STATS  = "http://localhost:8002"
 
 SERVICES_AVAILABLE = ["quotes", "ip_info"]  # solo los que tiene permiso
 
+def create_client(tiempo):
+    return httpx.AsyncClient(timeout=tiempo,cert=("cliente2.crt", "cliente2.key"),verify="ca.crt")
 
 async def single_request(client: httpx.AsyncClient, worker_id: int, service: str) -> dict:
     start = time.monotonic()
@@ -38,7 +40,7 @@ async def single_request(client: httpx.AsyncClient, worker_id: int, service: str
 
 
 async def worker(worker_id: int, n_requests: int, results: list):
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with create_client(15) as client:
         for i in range(n_requests):
             service = random.choice(SERVICES_AVAILABLE)
             result  = await single_request(client, worker_id, service)

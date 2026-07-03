@@ -7,6 +7,7 @@ import time
 import httpx
 from contextlib import asynccontextmanager
 from datetime import datetime
+import redis.asyncio as redis
 
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse
@@ -25,6 +26,9 @@ MAX_RETRIES      = 2
 CIRCUIT_OPEN: dict[str, int] = {}
 CIRCUIT_COOLDOWN = 30
 
+MAX_REQUESTS = 100 #Datos para rate limiting
+WINDOW = 60
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -37,6 +41,15 @@ app = FastAPI(
     description="Punto de acceso centralizado al sistema distribuido",
     version="1.0.0",
     lifespan=lifespan,
+)
+#Conexión de redis para rate limiting
+REDIS_URL = os.getenv(
+    "REDIS_URL",
+    "redis://redis:6379"
+)
+redis_client = redis.from_url(
+    REDIS_URL,
+    decode_responses=True
 )
 
 
@@ -117,6 +130,25 @@ async def proxy_request(
 ):
     start_time = time.monotonic()
     client_ip  = request.client.host if request.client else "unknown"
+
+    # Verificación de certificados con Nginx
+    client_verified = request.headers.get("X-Client-Verify")
+    client_dn       = request.headers.get("X-Client-DN")
+
+    client_obj = None
+    if api_key:
+        result = await db.execute(
+            select(Client).where(Client.api_key == api_key, Client.is_active == True)
+        )
+        client_obj = result.scalar_one_or_none()
+
+    if client_obj and client_dn:
+        if client_obj.cert_subject != client_dn:
+            raise HTTPException(
+                status_code=403,
+                detail="El certificado presentado no coincide con el cliente autenticado por API Key"
+            )
+
     api_key    = request.headers.get("X-API-Key", "").strip()
 
     # 1. Resolver cliente
@@ -160,6 +192,13 @@ async def proxy_request(
                 client_obj.id, service_obj.id, request.method, 403, elapsed, client_ip
             ))
             raise HTTPException(status_code=403, detail="Sin permiso para usar este servicio")
+        
+        allowed = await check_rate_limit(client_obj.id)
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail="Rate limit excedido"
+            )
 
     # 4. Circuit breaker
     if is_circuit_open(service_name):
@@ -199,7 +238,6 @@ async def proxy_request(
     last_status = 502
 
     for attempt in range(MAX_RETRIES + 1):
-
         try:
             async with httpx.AsyncClient(timeout=service_obj.timeout_sec) as hclient:
                 resp = await hclient.request(
@@ -209,24 +247,12 @@ async def proxy_request(
                     params=params,
                     content=body,
                 )
-
             elapsed = int((time.monotonic() - start_time) * 1000)
-
             mark_circuit_closed(service_name)
 
-            asyncio.create_task(
-                log_usage_background(
-                    client_obj.id if client_obj else None,
-                    service_obj.id,
-                    request.method,
-                    resp.status_code,
-                    elapsed,
-                    client_ip,
-                )
-            )
 
+            # Intentar devolver JSON, si no devolver texto plano envuelto
             content_type = resp.headers.get("content-type", "")
-
             if "application/json" in content_type:
                 try:
                     body_data = resp.json()
@@ -263,7 +289,6 @@ async def proxy_request(
         await asyncio.sleep(0.5 * (attempt + 1))
 
     mark_circuit_open(service_name)
-
     elapsed = int((time.monotonic() - start_time) * 1000)
 
     asyncio.create_task(
@@ -281,7 +306,17 @@ async def proxy_request(
         status_code=last_status,
         detail=str(last_exc)
         )
+        status_code=502,
+        detail=f"No se pudo conectar con '{service_name}' tras {MAX_RETRIES + 1} intentos"
+    )
 
+async def check_rate_limit(client_id: int):
+    key = f"rate_limit:{client_id}"
+    count = await redis_client.incr(key)
+    if count == 1:
+        await redis_client.expire(key, WINDOW)
+
+    return count <= MAX_REQUESTS
 
 if __name__ == "__main__":
     import uvicorn
