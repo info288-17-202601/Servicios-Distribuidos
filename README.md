@@ -5,6 +5,12 @@
 - Docker >= 24
 - Docker Compose >= 2.20
 - Python >= 3.10 (solo para ejecutar los clientes demo)
+- python-jose y passlib (para el panel)
+
+```bash
+#esto instala lo necesario para el panel
+pip install python-jose[cryptography] passlib[bcrypt]
+```
 
 ---
 
